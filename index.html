@@ -6,12 +6,28 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Robot Web UI</title>
+    <!-- Include MQTT.js from CDN -->
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <style>
+      body { font-family: sans-serif; padding: 20px; }
+      #status { margin-bottom: 20px; font-weight: bold; }
+      .hub-section { margin-bottom: 20px; padding: 15px; border: 1px solid #ccc; background-color: #f9f9f9; }
+      .connected { color: green; }
+      .disconnected { color: red; }
+    </style>
   </head>
   <body>
-    <h3>Robot Web UI</h3>
-    <div id="status">Connecting to server...</div>
+    <h3>Robot Web UI (Global Connection)</h3>
+    
+    <div class="hub-section">
+      <label for="hubId"><b>HUB ID:</b></label>
+      <input type="text" id="hubId" placeholder="e.g. XR2B9" style="text-transform: uppercase;">
+      <button id="connectBtn">Connect to Hub</button>
+      <div id="status" class="disconnected">Not Connected</div>
+    </div>
+
     <form id="form">
-      <label for="mode">Mode</label>
+      <label for="mode">Mode:</label>
       <select id="mode">
         <option value="kinematics">Kinematics</option>
         <option value="omx_kinematics">OMX Kinematics</option>
@@ -19,47 +35,104 @@
       <br><br>
       <textarea id="code" rows="20" cols="80" placeholder="Paste Python code here"></textarea>
       <br><br>
-      <button type="submit">Run</button>
+      <button type="submit" id="runBtn" disabled>Run Code</button>
     </form>
-    <pre id="output"></pre>
+    <h4>Output:</h4>
+    <pre id="output" style="background:#eee; padding:10px; min-height: 100px; border:1px solid #ccc;"></pre>
 
     <script>
       const form = document.getElementById('form');
       const output = document.getElementById('output');
       const code = document.getElementById('code');
       const mode = document.getElementById('mode');
-      const status = document.getElementById('status');
-      const ws = new WebSocket('ws://127.0.0.1:5056');
+      const statusEl = document.getElementById('status');
+      const hubIdInput = document.getElementById('hubId');
+      const connectBtn = document.getElementById('connectBtn');
+      const runBtn = document.getElementById('runBtn');
+      
+      let client = null;
+      let currentHubId = null;
 
-      function setStatus(message) {
-        status.textContent = message;
+      function setStatus(message, isConnected = false) {
+        statusEl.textContent = message;
+        statusEl.className = isConnected ? 'connected' : 'disconnected';
       }
 
-      ws.addEventListener('open', () => {
-        setStatus('Connected to server');
-        ws.send(JSON.stringify({ type: 'register', role: 'browser' }));
-      });
-
-      ws.addEventListener('message', (event) => {
-        const payload = JSON.parse(event.data);
-        if (payload.type === 'status') {
-          output.textContent += '[status] ' + (payload.message || '') + '\n';
-        } else if (payload.type === 'output') {
-          output.textContent += payload.data?.data || '';
-        } else if (payload.type === 'finished') {
-          output.textContent += '\n[finished] ' + (payload.message || '') + '\n';
+      connectBtn.addEventListener('click', () => {
+        const hubId = hubIdInput.value.trim().toUpperCase();
+        if (!hubId) {
+          alert("Please enter a Hub ID");
+          return;
         }
-      });
 
-      ws.addEventListener('close', () => {
-        setStatus('Disconnected from server');
+        if (client) {
+          client.end(); // Disconnect existing client
+        }
+
+        currentHubId = hubId;
+        setStatus('Connecting to broker...', false);
+        
+        // Connect to public EMQX broker via WebSockets
+        client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
+
+        client.on('connect', () => {
+          setStatus(`Connected to broker. Subscribing to Hub ${currentHubId}...`, true);
+          
+          const topicOut = `ab6/hub/${currentHubId}/out`;
+          client.subscribe(topicOut, (err) => {
+            if (!err) {
+              setStatus(`Connected & Listening to Hub: ${currentHubId}`, true);
+              runBtn.disabled = false;
+              output.textContent = "Ready.\n";
+            } else {
+              setStatus(`Subscription error: ${err.message}`, false);
+            }
+          });
+        });
+
+        client.on('message', (topic, message) => {
+          try {
+            const payload = JSON.parse(message.toString());
+            if (payload.type === 'status') {
+              output.textContent += '[status] ' + (payload.message || '') + '\n';
+            } else if (payload.type === 'output') {
+              output.textContent += payload.data?.data || '';
+            } else if (payload.type === 'finished') {
+              output.textContent += '\n[finished] ' + (payload.message || '') + '\n';
+            }
+          } catch (e) {
+            console.error("Invalid JSON message received", e);
+          }
+        });
+
+        client.on('error', (err) => {
+          setStatus(`Connection Error: ${err.message}`, false);
+          runBtn.disabled = true;
+        });
+
+        client.on('close', () => {
+          setStatus('Disconnected from broker', false);
+          runBtn.disabled = true;
+        });
       });
 
       form.addEventListener('submit', (e) => {
         e.preventDefault();
+        if (!client || !client.connected || !currentHubId) {
+          alert("Not connected to a Hub.");
+          return;
+        }
+        
         output.textContent = '';
-        setStatus('Sending to interface...');
-        ws.send(JSON.stringify({ type: 'run_code', role: 'browser', data: { code: code.value, mode: mode.value } }));
+        const topicRun = `ab6/hub/${currentHubId}/run`;
+        const payload = JSON.stringify({ 
+          type: 'run_code', 
+          role: 'browser', 
+          data: { code: code.value, mode: mode.value } 
+        });
+        
+        setStatus('Sending code to hub...', true);
+        client.publish(topicRun, payload);
       });
     </script>
   </body>
