@@ -60,6 +60,12 @@
         statusEl.className = isConnected ? 'connected' : 'disconnected';
       }
 
+      window.addEventListener('DOMContentLoaded', () => {
+        if (window.location.hostname && window.location.hostname !== "") {
+            relayUrlInput.value = 'ws://' + window.location.hostname + ':5056';
+        }
+      });
+
       connectBtn.addEventListener('click', () => {
         const hubId = hubIdInput.value.trim().toUpperCase();
         const relayUrl = relayUrlInput.value.trim();
