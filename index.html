@@ -1,0 +1,66 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>Robot Web UI</title>
+  </head>
+  <body>
+    <h3>Robot Web UI</h3>
+    <div id="status">Connecting to server...</div>
+    <form id="form">
+      <label for="mode">Mode</label>
+      <select id="mode">
+        <option value="kinematics">Kinematics</option>
+        <option value="omx_kinematics">OMX Kinematics</option>
+      </select>
+      <br><br>
+      <textarea id="code" rows="20" cols="80" placeholder="Paste Python code here"></textarea>
+      <br><br>
+      <button type="submit">Run</button>
+    </form>
+    <pre id="output"></pre>
+
+    <script>
+      const form = document.getElementById('form');
+      const output = document.getElementById('output');
+      const code = document.getElementById('code');
+      const mode = document.getElementById('mode');
+      const status = document.getElementById('status');
+      const ws = new WebSocket((window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.hostname + ':5056/ws');
+
+      function setStatus(message) {
+        status.textContent = message;
+      }
+
+      ws.addEventListener('open', () => {
+        setStatus('Connected to server');
+        ws.send(JSON.stringify({ type: 'register', role: 'browser' }));
+      });
+
+      ws.addEventListener('message', (event) => {
+        const payload = JSON.parse(event.data);
+        if (payload.type === 'status') {
+          output.textContent += '[status] ' + (payload.message || '') + '\n';
+        } else if (payload.type === 'output') {
+          output.textContent += payload.data?.data || '';
+        } else if (payload.type === 'finished') {
+          output.textContent += '\n[finished] ' + (payload.message || '') + '\n';
+        }
+      });
+
+      ws.addEventListener('close', () => {
+        setStatus('Disconnected from server');
+      });
+
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        output.textContent = '';
+        setStatus('Sending to interface...');
+        ws.send(JSON.stringify({ type: 'run_code', role: 'browser', data: { code: code.value, mode: mode.value } }));
+      });
+    </script>
+  </body>
+</html>
