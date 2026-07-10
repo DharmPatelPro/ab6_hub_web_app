@@ -6,8 +6,6 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Robot Web UI</title>
-    <!-- Include MQTT.js from CDN -->
-    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <style>
       body { font-family: sans-serif; padding: 20px; }
       #status { margin-bottom: 20px; font-weight: bold; }
@@ -17,9 +15,12 @@
     </style>
   </head>
   <body>
-    <h3>Robot Web UI (Global Connection)</h3>
+    <h3>Robot Web UI (WebSocket Relay)</h3>
     
     <div class="hub-section">
+      <label for="relayUrl"><b>Relay Server URL:</b></label>
+      <input type="text" id="relayUrl" value="ws://127.0.0.1:5056" style="width: 250px;">
+      <br><br>
       <label for="hubId"><b>HUB ID:</b></label>
       <input type="text" id="hubId" placeholder="e.g. XR2B9" style="text-transform: uppercase;">
       <button id="connectBtn">Connect to Hub</button>
@@ -47,10 +48,11 @@
       const mode = document.getElementById('mode');
       const statusEl = document.getElementById('status');
       const hubIdInput = document.getElementById('hubId');
+      const relayUrlInput = document.getElementById('relayUrl');
       const connectBtn = document.getElementById('connectBtn');
       const runBtn = document.getElementById('runBtn');
       
-      let client = null;
+      let ws = null;
       let currentHubId = null;
 
       function setStatus(message, isConnected = false) {
@@ -60,71 +62,83 @@
 
       connectBtn.addEventListener('click', () => {
         const hubId = hubIdInput.value.trim().toUpperCase();
-        if (!hubId) {
-          alert("Please enter a Hub ID");
+        const relayUrl = relayUrlInput.value.trim();
+        
+        if (!hubId || !relayUrl) {
+          alert("Please enter a Relay URL and Hub ID");
           return;
         }
 
-        if (client) {
-          client.end(); // Disconnect existing client
+        if (ws) {
+          ws.close(); // Disconnect existing client
         }
 
         currentHubId = hubId;
-        setStatus('Connecting to broker...', false);
+        setStatus('Connecting to relay...', false);
         
-        // Connect to public EMQX broker via WebSockets
-        client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
+        try {
+          ws = new WebSocket(relayUrl);
+        } catch(e) {
+          setStatus(`Connection Error: ${e.message}`, false);
+          return;
+        }
 
-        client.on('connect', () => {
-          setStatus(`Connected to broker. Subscribing to Hub ${currentHubId}...`, true);
+        ws.onopen = () => {
+          setStatus(`Connected to relay. Registering Browser for Hub ${currentHubId}...`, false);
           
-          const topicOut = `ab6/hub/${currentHubId}/out`;
-          client.subscribe(topicOut, (err) => {
-            if (!err) {
-              setStatus(`Connected & Listening to Hub: ${currentHubId}`, true);
-              runBtn.disabled = false;
-              output.textContent = "Ready.\n";
-            } else {
-              setStatus(`Subscription error: ${err.message}`, false);
-            }
-          });
-        });
+          ws.send(JSON.stringify({
+              type: 'register',
+              role: 'browser',
+              hub_id: currentHubId
+          }));
+        };
 
-        client.on('message', (topic, message) => {
+        ws.onmessage = (event) => {
           try {
-            const payload = JSON.parse(message.toString());
-            if (payload.type === 'status') {
+            const payload = JSON.parse(event.data);
+            if (payload.type === 'connection') {
+              if (payload.status === 'online') {
+                setStatus(`Connected to Hub: ${currentHubId}`, true);
+                runBtn.disabled = false;
+                output.textContent += "Hub is Online.\n";
+              } else {
+                setStatus(`Hub ${currentHubId} is Offline`, false);
+                runBtn.disabled = true;
+                output.textContent += "Hub disconnected.\n";
+              }
+            } else if (payload.type === 'status') {
               output.textContent += '[status] ' + (payload.message || '') + '\n';
             } else if (payload.type === 'output') {
               output.textContent += payload.data?.data || '';
             } else if (payload.type === 'finished') {
               output.textContent += '\n[finished] ' + (payload.message || '') + '\n';
+            } else if (payload.type === 'error') {
+              output.textContent += '\n[error] ' + (payload.message || '') + '\n';
             }
           } catch (e) {
             console.error("Invalid JSON message received", e);
           }
-        });
+        };
 
-        client.on('error', (err) => {
-          setStatus(`Connection Error: ${err.message}`, false);
+        ws.onerror = (err) => {
+          setStatus(`WebSocket Error`, false);
           runBtn.disabled = true;
-        });
+        };
 
-        client.on('close', () => {
-          setStatus('Disconnected from broker', false);
+        ws.onclose = () => {
+          setStatus('Disconnected from relay', false);
           runBtn.disabled = true;
-        });
+        };
       });
 
       form.addEventListener('submit', (e) => {
         e.preventDefault();
-        if (!client || !client.connected || !currentHubId) {
+        if (!ws || ws.readyState !== WebSocket.OPEN || !currentHubId) {
           alert("Not connected to a Hub.");
           return;
         }
         
         output.textContent = '';
-        const topicRun = `ab6/hub/${currentHubId}/run`;
         const payload = JSON.stringify({ 
           type: 'run_code', 
           role: 'browser', 
@@ -132,7 +146,7 @@
         });
         
         setStatus('Sending code to hub...', true);
-        client.publish(topicRun, payload);
+        ws.send(payload);
       });
     </script>
   </body>
