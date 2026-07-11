@@ -12,6 +12,8 @@
       body { font-family: sans-serif; padding: 20px; }
       #status { margin-bottom: 20px; font-weight: bold; }
       .hub-section { margin-bottom: 20px; padding: 15px; border: 1px solid #ccc; background-color: #f9f9f9; }
+      .stats-section { margin-bottom: 20px; padding: 15px; border: 1px solid #ccc; background-color: #e9f5ff; display: flex; gap: 20px; }
+      .stat-box { font-weight: bold; font-size: 1.1em; }
       .connected { color: green; }
       .disconnected { color: red; }
     </style>
@@ -24,6 +26,12 @@
       <input type="text" id="hubId" placeholder="e.g. HUB01" style="text-transform: uppercase;">
       <button id="connectBtn">Connect to Hub</button>
       <div id="status" class="disconnected">Not Connected</div>
+    </div>
+    
+    <div class="stats-section" id="statsSection" style="display: none;">
+      <div class="stat-box">Users Connected: <span id="statUsers">0</span></div>
+      <div class="stat-box">Scripts Ran: <span id="statRan">0</span></div>
+      <div class="stat-box">Scripts Pending: <span id="statPending">0</span></div>
     </div>
 
     <form id="form">
@@ -49,9 +57,14 @@
       const hubIdInput = document.getElementById('hubId');
       const connectBtn = document.getElementById('connectBtn');
       const runBtn = document.getElementById('runBtn');
+      const statsSection = document.getElementById('statsSection');
+      const statUsers = document.getElementById('statUsers');
+      const statRan = document.getElementById('statRan');
+      const statPending = document.getElementById('statPending');
       
       let client = null;
       let currentHubId = null;
+      const clientId = 'web_' + Math.random().toString(16).substr(2, 8);
 
       function setStatus(message, isConnected = false) {
         statusEl.textContent = message;
@@ -72,20 +85,32 @@
         currentHubId = hubId;
         setStatus('Connecting to Global WebSocket Broker...', false);
         
+        const topicPresence = `ab6/hub/${currentHubId}/presence`;
+        const lwt = {
+          topic: topicPresence,
+          payload: JSON.stringify({ type: 'leave', clientId: clientId }),
+          qos: 0,
+          retain: false
+        };
+
         // Connect via Secure WebSockets (WSS) to bypass Mixed-Content issues on HTTPS
-        client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
+        client = mqtt.connect('wss://broker.emqx.io:8084/mqtt', { will: lwt });
 
         client.on('connect', () => {
           setStatus(`Connected to broker. Subscribing to Hub ${currentHubId}...`, false);
           
           const topicOut = `ab6/hub/${currentHubId}/out`;
           const topicStatus = `ab6/hub/${currentHubId}/status`;
+          const topicStats = `ab6/hub/${currentHubId}/stats`;
           
-          client.subscribe([topicOut, topicStatus], (err) => {
+          client.subscribe([topicOut, topicStatus, topicStats], (err) => {
             if (!err) {
               setStatus(`Waiting for Hub ${currentHubId} to come online...`, false);
               runBtn.disabled = true;
               output.textContent = "Waiting for Hub heartbeat...\n";
+              
+              // Publish join presence
+              client.publish(topicPresence, JSON.stringify({ type: 'join', clientId: clientId }));
             } else {
               setStatus(`Subscription error: ${err.message}`, false);
             }
@@ -99,12 +124,18 @@
               if (payload.status === 'online') {
                 setStatus(`Connected to Hub: ${currentHubId}`, true);
                 runBtn.disabled = false;
+                statsSection.style.display = 'flex';
                 output.textContent += "Hub is Online!\n";
               } else {
                 setStatus(`Hub ${currentHubId} is Offline`, false);
                 runBtn.disabled = true;
+                statsSection.style.display = 'none';
                 output.textContent += "Hub disconnected.\n";
               }
+            } else if (payload.type === 'stats') {
+              statUsers.textContent = payload.users || 0;
+              statRan.textContent = payload.ran || 0;
+              statPending.textContent = payload.pending || 0;
             } else if (payload.type === 'status') {
               output.textContent += '[status] ' + (payload.message || '') + '\n';
             } else if (payload.type === 'output') {
