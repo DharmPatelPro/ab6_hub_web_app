@@ -1,182 +1,216 @@
 <!doctype html>
 <html>
-  <head>
-    <meta charset="utf-8">
-    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0">
-    <meta http-equiv="Pragma" content="no-cache">
-    <meta http-equiv="Expires" content="0">
-    <title>Robot Web UI</title>
-    <!-- Include MQTT.js from CDN to handle the Global WebSocket Broker -->
-    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
-    <style>
-      body { font-family: sans-serif; padding: 20px; }
-      #status { margin-bottom: 20px; font-weight: bold; }
-      .hub-section { margin-bottom: 20px; padding: 15px; border: 1px solid #ccc; background-color: #f9f9f9; }
-      .stats-section { margin-bottom: 20px; padding: 15px; border: 1px solid #ccc; background-color: #e9f5ff; display: flex; gap: 20px; }
-      .stat-box { font-weight: bold; font-size: 1.1em; }
-      .connected { color: green; }
-      .disconnected { color: red; }
-    </style>
-  </head>
-  <body>
-    <h3>Robot Web UI (Global Secure WebSockets)</h3>
-    
-    <div class="hub-section">
-      <label for="hubId"><b>HUB ID:</b></label>
-      <input type="text" id="hubId" placeholder="e.g. HUB01" style="text-transform: uppercase;">
-      <button id="connectBtn">Connect to Hub</button>
-      <div id="status" class="disconnected">Not Connected</div>
-    </div>
-    
-    <div class="stats-section" id="statsSection" style="display: none;">
-      <div class="stat-box">Users Connected: <span id="statUsers">0</span></div>
-      <div class="stat-box">Scripts Ran: <span id="statRan">0</span></div>
-      <div class="stat-box">Scripts Pending: <span id="statPending">0</span></div>
-    </div>
 
-    <form id="form">
-      <label for="mode">Mode:</label>
-      <select id="mode">
-        <option value="kinematics">Kinematics</option>
-        <option value="omx_kinematics">OMX Kinematics</option>
-      </select>
-      <br><br>
-      <textarea id="code" rows="20" cols="80" placeholder="Paste Python code here"></textarea>
-      <br><br>
-      <button type="submit" id="runBtn" disabled>Run Code</button>
-    </form>
-    <h4>Output:</h4>
-    <pre id="output" style="background:#eee; padding:10px; min-height: 100px; border:1px solid #ccc;"></pre>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>Robot Web UI</title>
+  <!-- Include MQTT.js from CDN to handle the Global WebSocket Broker -->
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 20px;
+    }
 
-    <script>
-      const form = document.getElementById('form');
-      const output = document.getElementById('output');
-      const code = document.getElementById('code');
-      const mode = document.getElementById('mode');
-      const statusEl = document.getElementById('status');
-      const hubIdInput = document.getElementById('hubId');
-      const connectBtn = document.getElementById('connectBtn');
-      const runBtn = document.getElementById('runBtn');
-      const statsSection = document.getElementById('statsSection');
-      const statUsers = document.getElementById('statUsers');
-      const statRan = document.getElementById('statRan');
-      const statPending = document.getElementById('statPending');
-      
-      let client = null;
-      let currentHubId = null;
-      const clientId = 'web_' + Math.random().toString(16).substr(2, 8);
+    #status {
+      margin-bottom: 20px;
+      font-weight: bold;
+    }
 
-      function setStatus(message, isConnected = false) {
-        statusEl.textContent = message;
-        statusEl.className = isConnected ? 'connected' : 'disconnected';
+    .hub-section {
+      margin-bottom: 20px;
+      padding: 15px;
+      border: 1px solid #ccc;
+      background-color: #f9f9f9;
+    }
+
+    .stats-section {
+      margin-bottom: 20px;
+      padding: 15px;
+      border: 1px solid #ccc;
+      background-color: #e9f5ff;
+      display: flex;
+      gap: 20px;
+    }
+
+    .stat-box {
+      font-weight: bold;
+      font-size: 1.1em;
+    }
+
+    .connected {
+      color: green;
+    }
+
+    .disconnected {
+      color: red;
+    }
+  </style>
+</head>
+
+<body>
+  <h3>Robot Web UI (Global Secure WebSockets)</h3>
+
+  <div class="hub-section">
+    <label for="hubId"><b>HUB ID:</b></label>
+    <input type="text" id="hubId" placeholder="e.g. HUB01" style="text-transform: uppercase;">
+    <button id="connectBtn">Connect to Hub</button>
+    <div id="status" class="disconnected">Not Connected</div>
+  </div>
+
+  <div class="stats-section" id="statsSection" style="display: none;">
+    <div class="stat-box">Users Connected: <span id="statUsers">0</span></div>
+    <div class="stat-box">Scripts Ran: <span id="statRan">0</span></div>
+    <div class="stat-box">Scripts Pending: <span id="statPending">0</span></div>
+  </div>
+
+  <form id="form">
+    <label for="mode">Mode:</label>
+    <select id="mode">
+      <option value="kinematics">Kinematics</option>
+      <option value="omx_kinematics">OMX Kinematics</option>
+    </select>
+    <br><br>
+    <textarea id="code" rows="20" cols="80" placeholder="Paste Python code here"></textarea>
+    <br><br>
+    <button type="submit" id="runBtn" disabled>Run Code</button>
+  </form>
+  <h4>Output:</h4>
+  <pre id="output" style="background:#eee; padding:10px; min-height: 100px; border:1px solid #ccc;"></pre>
+
+  <script>
+    const form = document.getElementById('form');
+    const output = document.getElementById('output');
+    const code = document.getElementById('code');
+    const mode = document.getElementById('mode');
+    const statusEl = document.getElementById('status');
+    const hubIdInput = document.getElementById('hubId');
+    const connectBtn = document.getElementById('connectBtn');
+    const runBtn = document.getElementById('runBtn');
+    const statsSection = document.getElementById('statsSection');
+    const statUsers = document.getElementById('statUsers');
+    const statRan = document.getElementById('statRan');
+    const statPending = document.getElementById('statPending');
+
+    let client = null;
+    let currentHubId = null;
+    const clientId = 'web_' + Math.random().toString(16).substr(2, 8);
+
+    function setStatus(message, isConnected = false) {
+      statusEl.textContent = message;
+      statusEl.className = isConnected ? 'connected' : 'disconnected';
+    }
+
+    connectBtn.addEventListener('click', () => {
+      const hubId = hubIdInput.value.trim().toUpperCase();
+      if (!hubId) {
+        alert("Please enter a Hub ID");
+        return;
       }
 
-      connectBtn.addEventListener('click', () => {
-        const hubId = hubIdInput.value.trim().toUpperCase();
-        if (!hubId) {
-          alert("Please enter a Hub ID");
-          return;
-        }
+      if (client) {
+        client.end();
+      }
 
-        if (client) {
-          client.end();
-        }
+      currentHubId = hubId;
+      setStatus('Connecting to Global WebSocket Broker...', false);
 
-        currentHubId = hubId;
-        setStatus('Connecting to Global WebSocket Broker...', false);
-        
-        const topicPresence = `ab6/hub/${currentHubId}/presence`;
-        const lwt = {
-          topic: topicPresence,
-          payload: JSON.stringify({ type: 'leave', clientId: clientId }),
-          qos: 0,
-          retain: false
-        };
+      const topicPresence = `ab6/robot/${currentHubId}/presence`;
+      const lwt = {
+        topic: topicPresence,
+        payload: JSON.stringify({ type: 'leave', clientId: clientId }),
+        qos: 0,
+        retain: false
+      };
 
-        // Connect via Secure WebSockets (WSS) to bypass Mixed-Content issues on HTTPS
-        client = mqtt.connect('wss://broker.emqx.io:8084/mqtt', { will: lwt });
+      // Connect via Secure WebSockets (WSS) to bypass Mixed-Content issues on HTTPS
+      client = mqtt.connect('wss://broker.emqx.io:8084/mqtt', { will: lwt });
 
-        client.on('connect', () => {
-          setStatus(`Connected to broker. Subscribing to Hub ${currentHubId}...`, false);
-          
-          const topicOut = `ab6/hub/${currentHubId}/out`;
-          const topicStatus = `ab6/hub/${currentHubId}/status`;
-          const topicStats = `ab6/hub/${currentHubId}/stats`;
-          
-          client.subscribe([topicOut, topicStatus, topicStats], (err) => {
-            if (!err) {
-              setStatus(`Waiting for Hub ${currentHubId} to come online...`, false);
-              runBtn.disabled = true;
-              output.textContent = "Waiting for Hub heartbeat...\n";
-              
-              // Publish join presence
-              client.publish(topicPresence, JSON.stringify({ type: 'join', clientId: clientId }));
-            } else {
-              setStatus(`Subscription error: ${err.message}`, false);
-            }
-          });
-        });
+      client.on('connect', () => {
+        setStatus(`Connected to broker. Subscribing to Hub ${currentHubId}...`, false);
 
-        client.on('message', (topic, message) => {
-          try {
-            const payload = JSON.parse(message.toString());
-            if (payload.type === 'connection') {
-              if (payload.status === 'online') {
-                setStatus(`Connected to Hub: ${currentHubId}`, true);
-                runBtn.disabled = false;
-                statsSection.style.display = 'flex';
-                output.textContent += "Hub is Online!\n";
-              } else {
-                setStatus(`Hub ${currentHubId} is Offline`, false);
-                runBtn.disabled = true;
-                statsSection.style.display = 'none';
-                output.textContent += "Hub disconnected.\n";
-              }
-            } else if (payload.type === 'stats') {
-              statUsers.textContent = payload.users || 0;
-              statRan.textContent = payload.ran || 0;
-              statPending.textContent = payload.pending || 0;
-            } else if (payload.type === 'status') {
-              output.textContent += '[status] ' + (payload.message || '') + '\n';
-            } else if (payload.type === 'output') {
-              output.textContent += payload.data?.data || '';
-            } else if (payload.type === 'finished') {
-              output.textContent += '\n[finished] ' + (payload.message || '') + '\n';
-            }
-          } catch (e) {
-            console.error("Invalid JSON message received", e);
+        const topicOut = `ab6/robot/${currentHubId}/out`;
+        const topicStatus = `ab6/robot/${currentHubId}/status`;
+        const topicStats = `ab6/robot/${currentHubId}/stats`;
+
+        client.subscribe([topicOut, topicStatus, topicStats], (err) => {
+          if (!err) {
+            setStatus(`Waiting for Hub ${currentHubId} to come online...`, false);
+            runBtn.disabled = true;
+            output.textContent = "Waiting for Hub heartbeat...\n";
+
+            // Publish join presence
+            client.publish(topicPresence, JSON.stringify({ type: 'join', clientId: clientId }));
+          } else {
+            setStatus(`Subscription error: ${err.message}`, false);
           }
         });
-
-        client.on('error', (err) => {
-          setStatus(`Connection Error: ${err.message}`, false);
-          runBtn.disabled = true;
-        });
-
-        client.on('close', () => {
-          setStatus('Disconnected from broker', false);
-          runBtn.disabled = true;
-        });
       });
 
-      form.addEventListener('submit', (e) => {
-        e.preventDefault();
-        if (!client || !client.connected || !currentHubId) {
-          alert("Not connected to a Hub.");
-          return;
+      client.on('message', (topic, message) => {
+        try {
+          const payload = JSON.parse(message.toString());
+          if (payload.type === 'connection') {
+            if (payload.status === 'online') {
+              setStatus(`Connected to Hub: ${currentHubId}`, true);
+              runBtn.disabled = false;
+              statsSection.style.display = 'flex';
+              output.textContent += "Hub is Online!\n";
+            } else {
+              setStatus(`Hub ${currentHubId} is Offline`, false);
+              runBtn.disabled = true;
+              statsSection.style.display = 'none';
+              output.textContent += "Hub disconnected.\n";
+            }
+          } else if (payload.type === 'stats') {
+            statUsers.textContent = payload.users || 0;
+            statRan.textContent = payload.ran || 0;
+            statPending.textContent = payload.pending || 0;
+          } else if (payload.type === 'status') {
+            output.textContent += '[status] ' + (payload.message || '') + '\n';
+          } else if (payload.type === 'output') {
+            output.textContent += payload.data?.data || '';
+          } else if (payload.type === 'finished') {
+            output.textContent += '\n[finished] ' + (payload.message || '') + '\n';
+          }
+        } catch (e) {
+          console.error("Invalid JSON message received", e);
         }
-        
-        output.textContent = '';
-        const topicRun = `ab6/hub/${currentHubId}/run`;
-        const payload = JSON.stringify({ 
-          type: 'run_code', 
-          role: 'browser', 
-          data: { code: code.value, mode: mode.value } 
-        });
-        
-        setStatus('Sending code to hub...', true);
-        client.publish(topicRun, payload);
       });
-    </script>
-  </body>
+
+      client.on('error', (err) => {
+        setStatus(`Connection Error: ${err.message}`, false);
+        runBtn.disabled = true;
+      });
+
+      client.on('close', () => {
+        setStatus('Disconnected from broker', false);
+        runBtn.disabled = true;
+      });
+    });
+
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      if (!client || !client.connected || !currentHubId) {
+        alert("Not connected to a Hub.");
+        return;
+      }
+
+      output.textContent = '';
+      const topicRun = `ab6/robot/${currentHubId}/run`;
+      const payload = JSON.stringify({
+        type: 'run_code',
+        role: 'browser',
+        data: { code: code.value, mode: mode.value }
+      });
+
+      setStatus('Sending code to hub...', true);
+      client.publish(topicRun, payload);
+    });
+  </script>
+</body>
+
 </html>
