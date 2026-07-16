@@ -342,33 +342,41 @@
       jobStatusText.textContent = message;
     }
 
-    function appendOutput(text, type = 'normal') {
-      let isOverwrite = false;
-      if (text.includes('\r')) {
-          isOverwrite = true;
-          text = text.replace(/\r/g, '');
-      }
-      
-      // If the text is empty after stripping \r, ignore it
-      if (!text && isOverwrite) return;
+    // -- High-performance terminal rendering --
+    // Buffer text and flush to DOM once per animation frame (~16ms)
+    let _termBuf = [];
+    let _termRAF = null;
+    const MAX_TERMINAL_LENGTH = 60000; // characters to keep in terminal
 
-      if (isOverwrite && output.lastChild && output.lastChild.dataset.overwrite === 'true') {
-          output.lastChild.textContent = text;
-      } else {
-          const span = document.createElement('span');
-          if (type === 'error') span.style.color = '#f87171';
-          if (type === 'system') span.style.color = '#60a5fa';
-          if (isOverwrite) span.dataset.overwrite = 'true';
-          
-          span.textContent = text;
-          output.appendChild(span);
-          
-          // Limit DOM nodes to prevent browser freezing on super fast telemetry loops
-          while (output.childNodes.length > 200) {
-            output.removeChild(output.firstChild);
-          }
+    function appendOutput(text, type = 'normal') {
+      if (!text) return;
+      _termBuf.push({ text, type });
+      if (!_termRAF) {
+        _termRAF = requestAnimationFrame(_flushTerminal);
       }
-      
+    }
+
+    function _flushTerminal() {
+      _termRAF = null;
+      if (_termBuf.length === 0) return;
+
+      const frag = document.createDocumentFragment();
+      for (const item of _termBuf) {
+        const span = document.createElement('span');
+        if (item.type === 'error') span.style.color = '#f87171';
+        if (item.type === 'system') span.style.color = '#60a5fa';
+        span.textContent = item.text;
+        frag.appendChild(span);
+      }
+      _termBuf.length = 0;
+
+      output.appendChild(frag);
+
+      // Trim old content to prevent memory bloat
+      while (output.childNodes.length > 300) {
+        output.removeChild(output.firstChild);
+      }
+
       output.scrollTop = output.scrollHeight;
     }
 
