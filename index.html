@@ -289,7 +289,11 @@
 
     <!-- Terminal Panel -->
     <div class="panel">
-      <label style="display: flex; align-items: center; gap: 0.75rem;">Live Output <span id="wsIndicator" style="font-size: 0.7rem; padding: 2px 8px; border-radius: 4px; background: #374151; color: #9ca3af;">⏳ WS…</span></label>
+      <label style="display: flex; align-items: center; gap: 0.75rem;">
+        Live Output 
+        <span id="wsIndicator" style="font-size: 0.7rem; padding: 2px 8px; border-radius: 4px; background: #374151; color: #9ca3af;">⏳ WS…</span>
+        <span id="latencyIndicator" style="font-size: 0.7rem; padding: 2px 8px; border-radius: 4px; background: #374151; color: #9ca3af; display: none;">0ms</span>
+      </label>
       <div class="terminal" id="output"></div>
     </div>
 
@@ -366,6 +370,24 @@
       }
       
       term.write(formatted);
+    }
+
+    function updateLatency(hubTs) {
+      if (!hubTs) return;
+      const latency = Date.now() - hubTs;
+      const ind = document.getElementById('latencyIndicator');
+      ind.style.display = 'inline-block';
+      ind.textContent = `${latency}ms`;
+      if (latency < 50) {
+          ind.style.background = '#065f46';
+          ind.style.color = '#34d399';
+      } else if (latency < 200) {
+          ind.style.background = '#78350f';
+          ind.style.color = '#fbbf24';
+      } else {
+          ind.style.background = '#7f1d1d';
+          ind.style.color = '#f87171';
+      }
     }
 
     connectBtn.addEventListener('click', () => {
@@ -452,7 +474,10 @@
             appendOutput(`[Status] ${payload.message}\n`, 'system');
           } else if (payload.type === 'output') {
             // Only use MQTT output if WS is not connected (WS is faster)
-            if (!wsConnected) appendOutput(payload.data?.data || '');
+            if (!wsConnected) {
+              appendOutput(payload.data?.data || '');
+              updateLatency(payload.hub_ts);
+            }
           } else if (payload.type === 'finished') {
             if (!wsConnected) appendOutput(`\n[Finished] ${payload.message}\n\n`, 'system');
           }
@@ -507,6 +532,7 @@
           const payload = JSON.parse(event.data);
           if (payload.type === 'output') {
             appendOutput(payload.data?.data || '');
+            updateLatency(payload.hub_ts);
           } else if (payload.type === 'job_status') {
             setJobStatus(payload.state, payload.message);
           } else if (payload.type === 'finished') {
