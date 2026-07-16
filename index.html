@@ -531,8 +531,12 @@
       wsIndicator.style.background = '#374151';
       wsIndicator.style.color = '#9ca3af';
 
-      // Connect to the Hub's WebSocket on the same hostname the page was loaded from
-      const wsHost = window.location.hostname || 'localhost';
+      // Connect to the Hub's WebSocket. 
+      // If hosted on GitHub pages, force 'localhost' since the Hub runs locally on the user's machine.
+      let wsHost = window.location.hostname || 'localhost';
+      if (wsHost === 'dharmpatelpro.github.io') {
+          wsHost = 'localhost';
+      }
       const wsUrl = `ws://${wsHost}:5057`;
 
       try {
