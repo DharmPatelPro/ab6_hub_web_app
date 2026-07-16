@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HUB Control Center</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
   <style>
     :root {
@@ -203,16 +205,13 @@
       border: 1px solid var(--border-color);
       border-radius: 8px;
       padding: 1rem;
-      font-family: 'Fira Code', monospace;
-      font-size: 0.9rem;
-      color: #a7f3d0;
-      min-height: 200px;
-      max-height: 400px;
-      overflow-y: auto;
-      white-space: pre-wrap;
+      min-height: 250px;
       box-shadow: inset 0 2px 10px rgba(0,0,0,0.5);
     }
-
+    
+    .xterm .xterm-viewport {
+      border-radius: 4px;
+    }
   </style>
 </head>
 <body>
@@ -291,7 +290,7 @@
     <!-- Terminal Panel -->
     <div class="panel">
       <label style="display: flex; align-items: center; gap: 0.75rem;">Live Output <span id="wsIndicator" style="font-size: 0.7rem; padding: 2px 8px; border-radius: 4px; background: #374151; color: #9ca3af;">⏳ WS…</span></label>
-      <div class="terminal" id="output">Waiting for connection...</div>
+      <div class="terminal" id="output"></div>
     </div>
 
   </div>
@@ -342,42 +341,31 @@
       jobStatusText.textContent = message;
     }
 
-    // -- High-performance terminal rendering --
-    // Buffer text and flush to DOM once per animation frame (~16ms)
-    let _termBuf = [];
-    let _termRAF = null;
-    const MAX_TERMINAL_LENGTH = 60000; // characters to keep in terminal
+    // -- Xterm.js Terminal Initialization --
+    const term = new Terminal({
+      theme: { background: '#0f172a', foreground: '#a7f3d0', cursor: '#3b82f6' },
+      fontFamily: '"Fira Code", monospace',
+      fontSize: 14,
+      scrollback: 10000,
+      disableStdin: true
+    });
+    term.open(output);
+    term.writeln('Waiting for connection...\r\n');
 
     function appendOutput(text, type = 'normal') {
       if (!text) return;
-      _termBuf.push({ text, type });
-      if (!_termRAF) {
-        _termRAF = requestAnimationFrame(_flushTerminal);
+      
+      // Xterm.js requires \r\n for newlines, but sometimes Python outputs just \n
+      // We also handle colors via basic ANSI escape codes
+      let formatted = text.replace(/(?<!\r)\n/g, '\r\n');
+      
+      if (type === 'system') {
+        formatted = `\x1b[36m${formatted}\x1b[0m`; // Cyan
+      } else if (type === 'error') {
+        formatted = `\x1b[31m${formatted}\x1b[0m`; // Red
       }
-    }
-
-    function _flushTerminal() {
-      _termRAF = null;
-      if (_termBuf.length === 0) return;
-
-      const frag = document.createDocumentFragment();
-      for (const item of _termBuf) {
-        const span = document.createElement('span');
-        if (item.type === 'error') span.style.color = '#f87171';
-        if (item.type === 'system') span.style.color = '#60a5fa';
-        span.textContent = item.text;
-        frag.appendChild(span);
-      }
-      _termBuf.length = 0;
-
-      output.appendChild(frag);
-
-      // Trim old content to prevent memory bloat
-      while (output.childNodes.length > 300) {
-        output.removeChild(output.firstChild);
-      }
-
-      output.scrollTop = output.scrollHeight;
+      
+      term.write(formatted);
     }
 
     connectBtn.addEventListener('click', () => {
@@ -393,7 +381,7 @@
 
       currentHubId = hubId;
       setStatus('connecting', 'Connecting...');
-      output.innerHTML = '';
+      term.clear();
       appendOutput(`[System] Connecting to Hub ${currentHubId} via secure WebSockets...\n`, 'system');
 
       const topicPresence = `ab6/robot/${currentHubId}/presence`;
