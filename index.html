@@ -527,13 +527,13 @@
               updateLatency(payload.hub_ts);
             }
           } else if (payload.type === 'tunnel') {
-            // Hub sent its public WebSocket URL
-            if (payload.ws_url) {
-              tunnelUrl = payload.ws_url;  // Always cache the latest URL
-              if (!wsConnected && sessionToken) {
-                appendOutput(`[System] Tunnel ready. Trying connection...\n`, 'system');
-                connectLocalWS(true);
-              }
+            // Hub sent its public WebSocket URL and potentially LAN IP
+            if (payload.ws_url) tunnelUrl = payload.ws_url;  // Always cache the latest URL
+            if (payload.lan_ip) lanIp = payload.lan_ip;
+            
+            if (!wsConnected && sessionToken) {
+              appendOutput(`[System] Hub routing updated. Trying connection...\n`, 'system');
+              connectLocalWS(true);
             }
           } else if (payload.type === 'finished') {
             if (!wsConnected) appendOutput(`\n[Finished] ${payload.message}\n\n`, 'system');
@@ -557,6 +557,7 @@
     // WebSocket connection (LAN or Tunnel)
     // ------------------------------------------------------------------
     let tunnelUrl = null;  // Cached tunnel URL from MQTT
+    let lanIp = null;      // Cached LAN IP from MQTT
     let wsReconnectTimer = null; // Reconnection debounce
     let sessionToken = null;
     let sessionTopicPrefix = null;
@@ -593,8 +594,9 @@
       } else {
         // ALWAYS Try local LAN connection first
         let wsHost = window.location.hostname || 'localhost';
-        if (wsHost === 'dharmpatelpro.github.io') {
-            wsHost = 'localhost';
+        if (wsHost === 'dharmpatelpro.github.io' || wsHost === 'localhost') {
+            // Use the LAN IP provided by the Hub, otherwise fallback to localhost
+            wsHost = lanIp || 'localhost';
         }
         wsUrl = `ws://${wsHost}:5057`;
       }
