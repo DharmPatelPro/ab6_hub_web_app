@@ -446,8 +446,9 @@
         const topicOut = `ab6/robot/${currentHubId}/out`;
         const topicStatus = `ab6/robot/${currentHubId}/status`;
         const topicStats = `ab6/robot/${currentHubId}/stats`;
+        const topicTunnel = `ab6/robot/${currentHubId}/tunnel`;
 
-        client.subscribe([topicOut, topicStatus, topicStats], (err) => {
+        client.subscribe([topicOut, topicStatus, topicStats, topicTunnel], (err) => {
           if (!err) {
             setStatus('connecting', 'Waiting for Hub...');
             client.publish(topicPresence, JSON.stringify({ type: 'join', clientId: clientId }));
@@ -501,6 +502,12 @@
               appendOutput(payload.data?.data || '');
               updateLatency(payload.hub_ts);
             }
+          } else if (payload.type === 'tunnel') {
+            // Hub sent its ngrok public WebSocket URL — connect to it!
+            if (payload.ws_url && !wsConnected) {
+              appendOutput(`[System] Tunnel available: ${payload.ws_url}\n`, 'system');
+              connectLocalWS(payload.ws_url);
+            }
           } else if (payload.type === 'finished') {
             if (!wsConnected) appendOutput(`\n[Finished] ${payload.message}\n\n`, 'system');
           }
@@ -520,9 +527,11 @@
     });
 
     // ------------------------------------------------------------------
-    // Local WebSocket connection (LAN-speed live output)
+    // WebSocket connection (LAN or Tunnel)
     // ------------------------------------------------------------------
-    function connectLocalWS() {
+    let tunnelUrl = null;  // Cached tunnel URL from MQTT
+
+    function connectLocalWS(overrideUrl) {
       if (wsClient) {
         try { wsClient.close(); } catch(e) {}
       }
@@ -531,13 +540,26 @@
       wsIndicator.style.background = '#374151';
       wsIndicator.style.color = '#9ca3af';
 
-      // Connect to the Hub's WebSocket. 
-      // If hosted on GitHub pages, force 'localhost' since the Hub runs locally on the user's machine.
-      let wsHost = window.location.hostname || 'localhost';
-      if (wsHost === 'dharmpatelpro.github.io') {
-          wsHost = 'localhost';
+      let wsUrl;
+      let isTunnel = false;
+
+      if (overrideUrl) {
+        // Tunnel URL provided by MQTT (ngrok public URL)
+        wsUrl = overrideUrl;
+        tunnelUrl = overrideUrl;
+        isTunnel = true;
+      } else if (tunnelUrl) {
+        // Reuse previously received tunnel URL
+        wsUrl = tunnelUrl;
+        isTunnel = true;
+      } else {
+        // Try local LAN connection
+        let wsHost = window.location.hostname || 'localhost';
+        if (wsHost === 'dharmpatelpro.github.io') {
+            wsHost = 'localhost';
+        }
+        wsUrl = `ws://${wsHost}:5057`;
       }
-      const wsUrl = `ws://${wsHost}:5057`;
 
       try {
         wsClient = new WebSocket(wsUrl);
@@ -548,10 +570,17 @@
 
       wsClient.onopen = () => {
         wsConnected = true;
-        wsIndicator.textContent = '⚡ LAN';
-        wsIndicator.style.background = '#065f46';
-        wsIndicator.style.color = '#34d399';
-        console.log('Local WebSocket connected — using LAN-speed output');
+        if (isTunnel) {
+          wsIndicator.textContent = '🌐 Tunnel';
+          wsIndicator.style.background = '#4c1d95';
+          wsIndicator.style.color = '#c4b5fd';
+          console.log('WebSocket connected via ngrok tunnel');
+        } else {
+          wsIndicator.textContent = '⚡ LAN';
+          wsIndicator.style.background = '#065f46';
+          wsIndicator.style.color = '#34d399';
+          console.log('Local WebSocket connected — using LAN-speed output');
+        }
       };
 
       wsClient.onmessage = (event) => {
@@ -575,9 +604,9 @@
         wsIndicator.textContent = '☁️ Cloud';
         wsIndicator.style.background = '#1e3a5f';
         wsIndicator.style.color = '#60a5fa';
-        console.log('Local WS disconnected, falling back to MQTT');
-        // Retry connection after 3 seconds
-        setTimeout(() => { if (currentHubId) connectLocalWS(); }, 3000);
+        console.log('WS disconnected, falling back to MQTT');
+        // Retry connection after 5 seconds (try tunnel first, then LAN)
+        setTimeout(() => { if (currentHubId) connectLocalWS(); }, 5000);
       };
 
       wsClient.onerror = (e) => {
