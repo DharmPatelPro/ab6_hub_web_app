@@ -534,10 +534,22 @@
     // WebSocket connection (LAN or Tunnel)
     // ------------------------------------------------------------------
     let tunnelUrl = null;  // Cached tunnel URL from MQTT
+    let wsReconnectTimer = null; // Reconnection debounce
 
     function connectLocalWS(overrideUrl) {
+      if (wsReconnectTimer) {
+        clearTimeout(wsReconnectTimer);
+        wsReconnectTimer = null;
+      }
       if (wsClient) {
-        try { wsClient.close(); } catch(e) {}
+        try { 
+          // Clear handlers to avoid firing onclose when we intentionally close it
+          wsClient.onclose = null;
+          wsClient.onerror = null;
+          wsClient.onmessage = null;
+          wsClient.onopen = null;
+          wsClient.close(); 
+        } catch(e) {}
       }
       wsConnected = false;
       wsIndicator.textContent = '⏳ WS…';
@@ -566,17 +578,14 @@
       }
 
       try {
-        if (isTunnel) {
-          // For ngrok free tier: pass a subprotocol to help bypass the interstitial warning
-          wsClient = new WebSocket(wsUrl, ['binary', 'ngrok-skip-browser-warning']);
-        } else {
-          wsClient = new WebSocket(wsUrl);
-        }
+        wsClient = new WebSocket(wsUrl);
       } catch (e) {
         console.warn('WS connect failed:', e);
         // If LAN fails, don't keep retrying — wait for tunnel URL from MQTT
         if (!isTunnel) {
           console.log('LAN WS failed, waiting for tunnel URL from MQTT...');
+        } else {
+          wsReconnectTimer = setTimeout(() => { if (currentHubId) connectLocalWS(); }, 5000);
         }
         return;
       }
@@ -619,7 +628,7 @@
         wsIndicator.style.color = '#60a5fa';
         console.log('WS disconnected, falling back to MQTT');
         // Retry connection after 5 seconds (try tunnel first, then LAN)
-        setTimeout(() => { if (currentHubId) connectLocalWS(); }, 5000);
+        wsReconnectTimer = setTimeout(() => { if (currentHubId) connectLocalWS(); }, 5000);
       };
 
       wsClient.onerror = (e) => {
