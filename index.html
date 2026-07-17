@@ -448,13 +448,12 @@
       client = mqtt.connect('wss://broker.emqx.io:8084/mqtt', { will: lwt });
 
       client.on('connect', () => {
-        const topicOut = `ab6/robot/${currentHubId}/out`;
         const topicStatus = `ab6/robot/${currentHubId}/status`;
         const topicStats = `ab6/robot/${currentHubId}/stats`;
         const topicTunnel = `ab6/robot/${currentHubId}/tunnel`;
         const topicAuth = `ab6/robot/${currentHubId}/auth/${clientId}`;
 
-        client.subscribe([topicOut, topicStatus, topicStats, topicTunnel, topicAuth], (err) => {
+        client.subscribe([topicStatus, topicStats, topicTunnel, topicAuth], (err) => {
           if (!err) {
             setStatus('connecting', 'Waiting for Hub...');
             client.publish(topicPresence, JSON.stringify({ type: 'join', clientId: clientId }));
@@ -483,6 +482,14 @@
           if (payload.type === 'auth') {
              sessionToken = payload.session_token;
              sessionTopicPrefix = payload.session_prefix;
+            
+            client.subscribe([`${sessionTopicPrefix}/run`, `${sessionTopicPrefix}/out`], (err) => {
+                if (err) {
+                    console.error("Failed to subscribe to session topics");
+                } else {
+                    console.log("Subscribed to session topics");
+                }
+            });
              appendOutput(`[System] Authenticated securely! (Session: ${sessionToken.substring(0,6)})\n`, 'system');
              // Try connecting to WS now that we have a token
              connectLocalWS();
