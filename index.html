@@ -439,7 +439,8 @@
 
       client = mqtt.connect('wss://broker.emqx.io:8084/mqtt', { will: lwt });
 
-      // --- Local WebSocket for fast output ---
+      // --- Try local WebSocket first, but don't block on it ---
+      // On remote devices this will fail silently; the tunnel URL from MQTT will take over.
       connectLocalWS();
 
       client.on('connect', () => {
@@ -504,9 +505,12 @@
             }
           } else if (payload.type === 'tunnel') {
             // Hub sent its ngrok public WebSocket URL — connect to it!
-            if (payload.ws_url && !wsConnected) {
-              appendOutput(`[System] Tunnel available: ${payload.ws_url}\n`, 'system');
-              connectLocalWS(payload.ws_url);
+            if (payload.ws_url) {
+              tunnelUrl = payload.ws_url;  // Always cache the latest URL
+              if (!wsConnected) {
+                appendOutput(`[System] Tunnel detected: connecting...\n`, 'system');
+                connectLocalWS(payload.ws_url);
+              }
             }
           } else if (payload.type === 'finished') {
             if (!wsConnected) appendOutput(`\n[Finished] ${payload.message}\n\n`, 'system');
@@ -562,9 +566,18 @@
       }
 
       try {
-        wsClient = new WebSocket(wsUrl);
+        if (isTunnel) {
+          // For ngrok free tier: pass a subprotocol to help bypass the interstitial warning
+          wsClient = new WebSocket(wsUrl, ['binary', 'ngrok-skip-browser-warning']);
+        } else {
+          wsClient = new WebSocket(wsUrl);
+        }
       } catch (e) {
         console.warn('WS connect failed:', e);
+        // If LAN fails, don't keep retrying — wait for tunnel URL from MQTT
+        if (!isTunnel) {
+          console.log('LAN WS failed, waiting for tunnel URL from MQTT...');
+        }
         return;
       }
 
