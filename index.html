@@ -458,6 +458,18 @@
           if (!err) {
             setStatus('connecting', 'Waiting for Hub...');
             client.publish(topicPresence, JSON.stringify({ type: 'join', clientId: clientId }));
+            
+            // Retry auth handshake if Hub missed it (e.g. temporary disconnect)
+            let authAttempts = 0;
+            const authInterval = setInterval(() => {
+                if (sessionToken) {
+                    clearInterval(authInterval);
+                } else {
+                    if (++authAttempts > 10) clearInterval(authInterval);
+                    else client.publish(topicPresence, JSON.stringify({ type: 'join', clientId: clientId }));
+                }
+            }, 2000);
+            
           } else {
             setStatus('disconnected', 'Subscription Error');
             appendOutput(`[Error] ${err.message}\n`, 'error');
